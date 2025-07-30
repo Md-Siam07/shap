@@ -2,7 +2,7 @@ name: test_js
 on:
   push:
     branches:
-      - main
+      - master
 
 jobs:
   build-js:

@@ -2,7 +2,7 @@ name: tests
 on:
   push:
     branches:
-      - main
+      - master
 
 concurrency:
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}

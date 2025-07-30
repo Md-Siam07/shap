@@ -2,7 +2,7 @@ name: measure_metrics.yml
 on:
   push:
     branches:
-      - main
+      - master
 
 jobs:
   analyze:
