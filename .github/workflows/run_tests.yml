@@ -1,140 +1,235 @@
 name: tests
-
 on:
-  workflow_dispatch:
   push:
     branches:
-      - master
-  pull_request:
-    branches:
-      - master
-    paths:
-      - "shap/**"
-      - "tests/**"
-      - "data/**"
-      - "javascript/**"  # Include JS changes that affect bundle.js
-      - ".github/workflows/run_tests.yml"
-      - "pyproject.toml"
-      - "setup.py"
+      - main
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  # Cancel only PR intermediate builds
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
-
+  group: ${{ github.workflow }}-${{ github.ref }}
 jobs:
-  run_tests:
-    strategy:
-      matrix:
-        os: ["ubuntu-latest"]
-        # The total number of matrix jobs should match codecov.yml `after_n_builds`.
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
-        extras: ["test"]
-        include:
-          # Test on windows/mac, just one job each
-          - os: windows-latest
-            python-version: "3.12"
-            extras: "test"
-          - os: macos-latest
-            python-version: "3.12"
-            extras: "test"
-          # Run tests with only the core dependencies, to ensure we
-          # cover the latest version of numpy/pandas. See GH dsgibbons#46
-          - os: ubuntu-latest
-            python-version: "3.12"
-            extras: "test-core"
-      fail-fast: false
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: filter
-        with:
-          filters: |
-            js:
-              - 'javascript/**'
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-      # Build JavaScript bundle if JS files have changed
-      - name: Set up Node.js
-        if: steps.filter.outputs.js == 'true'
-        uses: actions/setup-node@v3
-        with:
-          node-version: lts/Hydrogen
-      - name: Build JavaScript bundle conditionally
-        if: steps.filter.outputs.js == 'true'
-        shell: bash
-        run: |
-          cd javascript
-          npm ci
-          npm run build
-          cp build/bundle.js ../shap/plots/resources/bundle.js
-      - name: Install libomp (macOS)
-        if: matrix.os == 'macos-latest'
-        run: brew install libomp
-      - name: Install dependencies
-        # Do regular install NOT editable install: see GH #3020
-        run: |
-          python -m pip install --upgrade uv
-          uv pip install --system '.[${{ matrix.extras }},plots]'
-      - name: Test with pytest
-        # Ensure we avoid adding current working directory to sys.path:
-        # - Use "pytest" over "python -m pytest"
-        # - Use "append" import mode rather than default "prepend"
-        run: >
-          pytest --durations=20
-          --cov --cov-report=xml
-          --mpl-generate-summary=html --mpl-results-path=./mpl-results
-          --import-mode=append
-      - name: Upload mpl test report
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: mpl-results-${{ matrix.python-version }}-${{ runner.os }}-${{ matrix.extras }}
-          path: mpl-results/
-          if-no-files-found: ignore
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-
-  test_oldest_supported_numpy:
-    # Package is built with numpy 2.X, and tested against numpy 1.X.
-    # This job is recommended by https://numpy.org/doc/stable/dev/depending_on_numpy.html#numpy-2-0-specific-advice
-    # The "oldest supported numpy" is determined by SPEC 0:
-    # https://scientific-python.org/specs/spec-0000/
-    name: run tests (oldest supported numpy)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python 3.9
-        uses: actions/setup-python@v5
-        with:
-          python-version: 3.9
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade uv
-          uv pip install --system numpy==1.24.0 '.[test-core,plots]'
-      - name: Test with pytest
-        run: pytest --durations=20 --import-mode=append
-
   run_mypy:
-    # Run mypy on the latest Python version
     name: run mypy
     runs-on: ubuntu-latest
     steps:
+      - name: Start Energy Measurement
+        uses: green-coding-solutions/eco-ci-energy-estimation@862050e4f01f65b1436e5eca18ba4bd85562f0de
+        with:
+          json-output: true
+          task: start-measurement
       - uses: actions/checkout@v4
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: 3.12
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade uv
-          uv pip install --system '.[test-core]'
+        run: 'python -m pip install --upgrade uv
+
+          uv pip install --system ''.[test-core]''
+
           uv pip install --system --reinstall -r requirements.ci.txt
+
+          '
+      - id: measurement-4
+        name: Record Measurement After Install dependencies
+        uses: green-coding-solutions/eco-ci-energy-estimation@862050e4f01f65b1436e5eca18ba4bd85562f0de
+        with:
+          json-output: true
+          label: Install dependencies
+          task: get-measurement
       - name: Run mypy
         run: mypy shap tests
+      - id: measurement-6
+        name: Record Measurement After Run mypy
+        uses: green-coding-solutions/eco-ci-energy-estimation@862050e4f01f65b1436e5eca18ba4bd85562f0de
+        with:
+          json-output: true
+          label: Run mypy
+          task: get-measurement
+      - id: display-measurement
+        name: Display Energy Results
+        uses: green-coding-solutions/eco-ci-energy-estimation@862050e4f01f65b1436e5eca18ba4bd85562f0de
+        with:
+          json-output: true
+          task: display-results
+      - name: Save Total Energy Consumption Data
+        run: echo '${{ steps.final-measurement.outputs.data-total-json }}' > total_energy_consumption.json
+      - name: Upload Energy Consumption Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: total-energy-consumption
+          path: total_energy_consumption.json
+  run_tests:
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Start Energy Measurement
+        uses: green-coding-solutions/eco-ci-energy-estimation@862050e4f01f65b1436e5eca18ba4bd85562f0de
+        with:
+          json-output: true
+          task: start-measurement
+      - uses: actions/checkout@v4
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: "js:\n  - 'javascript/**'\n"
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - if: steps.filter.outputs.js == 'true'
+        name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: lts/Hydrogen
+      - if: steps.filter.outputs.js == 'true'
+        name: Build JavaScript bundle conditionally
+        run: 'cd javascript
+
+          npm ci
+
+          npm run build
+
+          cp build/bundle.js ../shap/plots/resources/bundle.js
+
+          '
+        shell: bash
+      - id: measurement-6
+        name: Record Measurement After Build JavaScript bundle conditionally
+        uses: green-coding-solutions/eco-ci-energy-estimation@862050e4f01f65b1436e5eca18ba4bd85562f0de
+        with:
+          json-output: true
+          label: Build JavaScript bundle conditionally
+          task: get-measurement
+      - if: matrix.os == 'macos-latest'
+        name: Install libomp (macOS)
+        run: brew install libomp
+      - id: measurement-8
+        name: Record Measurement After Install libomp (macOS)
+        uses: green-coding-solutions/eco-ci-energy-estimation@862050e4f01f65b1436e5eca18ba4bd85562f0de
+        with:
+          json-output: true
+          label: Install libomp (macOS)
+          task: get-measurement
+      - name: Install dependencies
+        run: 'python -m pip install --upgrade uv
+
+          uv pip install --system ''.[${{ matrix.extras }},plots]''
+
+          '
+      - id: measurement-10
+        name: Record Measurement After Install dependencies
+        uses: green-coding-solutions/eco-ci-energy-estimation@862050e4f01f65b1436e5eca18ba4bd85562f0de
+        with:
+          json-output: true
+          label: Install dependencies
+          task: get-measurement
+      - name: Test with pytest
+        run: 'pytest --durations=20 --cov --cov-report=xml --mpl-generate-summary=html
+          --mpl-results-path=./mpl-results --import-mode=append
+
+          '
+      - id: measurement-12
+        name: Record Measurement After Test with pytest
+        uses: green-coding-solutions/eco-ci-energy-estimation@862050e4f01f65b1436e5eca18ba4bd85562f0de
+        with:
+          json-output: true
+          label: Test with pytest
+          task: get-measurement
+      - if: failure()
+        name: Upload mpl test report
+        uses: actions/upload-artifact@v4
+        with:
+          if-no-files-found: ignore
+          name: mpl-results-${{ matrix.python-version }}-${{ runner.os }}-${{ matrix.extras
+            }}
+          path: mpl-results/
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+      - id: display-measurement
+        name: Display Energy Results
+        uses: green-coding-solutions/eco-ci-energy-estimation@862050e4f01f65b1436e5eca18ba4bd85562f0de
+        with:
+          json-output: true
+          task: display-results
+      - name: Save Total Energy Consumption Data
+        run: echo '${{ steps.final-measurement.outputs.data-total-json }}' > total_energy_consumption.json
+      - name: Upload Energy Consumption Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: total-energy-consumption
+          path: total_energy_consumption.json
+    strategy:
+      fail-fast: false
+      matrix:
+        extras:
+          - test
+        include:
+          - extras: test
+            os: windows-latest
+            python-version: '3.12'
+          - extras: test
+            os: macos-latest
+            python-version: '3.12'
+          - extras: test-core
+            os: ubuntu-latest
+            python-version: '3.12'
+        os:
+          - ubuntu-latest
+        python-version:
+          - '3.9'
+          - '3.10'
+          - '3.11'
+          - '3.12'
+          - '3.13'
+    timeout-minutes: 40
+  test_oldest_supported_numpy:
+    name: run tests (oldest supported numpy)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Start Energy Measurement
+        uses: green-coding-solutions/eco-ci-energy-estimation@862050e4f01f65b1436e5eca18ba4bd85562f0de
+        with:
+          json-output: true
+          task: start-measurement
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.9
+      - name: Install dependencies
+        run: 'python -m pip install --upgrade uv
+
+          uv pip install --system numpy==1.24.0 ''.[test-core,plots]''
+
+          '
+      - id: measurement-4
+        name: Record Measurement After Install dependencies
+        uses: green-coding-solutions/eco-ci-energy-estimation@862050e4f01f65b1436e5eca18ba4bd85562f0de
+        with:
+          json-output: true
+          label: Install dependencies
+          task: get-measurement
+      - name: Test with pytest
+        run: pytest --durations=20 --import-mode=append
+      - id: measurement-6
+        name: Record Measurement After Test with pytest
+        uses: green-coding-solutions/eco-ci-energy-estimation@862050e4f01f65b1436e5eca18ba4bd85562f0de
+        with:
+          json-output: true
+          label: Test with pytest
+          task: get-measurement
+      - id: display-measurement
+        name: Display Energy Results
+        uses: green-coding-solutions/eco-ci-energy-estimation@862050e4f01f65b1436e5eca18ba4bd85562f0de
+        with:
+          json-output: true
+          task: display-results
+      - name: Save Total Energy Consumption Data
+        run: echo '${{ steps.final-measurement.outputs.data-total-json }}' > total_energy_consumption.json
+      - name: Upload Energy Consumption Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: total-energy-consumption
+          path: total_energy_consumption.json

@@ -1,47 +1,77 @@
-# Ensure that the javascript package can be built with webpack
-# Runs on any PRs that modify the javascript directory
-# Also verifies that the built bundle matches the committed bundle
-
 name: test_js
-
 on:
   push:
     branches:
-      - master
-  pull_request:
-    branches:
-      - master
-    paths:
-      - "javascript/**"
+      - main
 
 jobs:
   build-js:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-node@v3
-      with:
-        node-version: lts/Hydrogen
-    - run: npm ci
-      working-directory: ./javascript
-    - run: npm run build
-      working-directory: ./javascript
-    - run: npm run test
-      working-directory: ./javascript
-
-    # Check if the built bundle matches the committed bundle (ignoring whitespace)
-    - name: Compare built bundle with committed bundle
-      run: |
-        # Normalize whitespace in both files for comparison
-        # Remove empty lines and all whitespace, then compare
-        sed '/^[[:space:]]*$/d; s/[[:space:]]//g' javascript/build/bundle.js | tr -d '\n' > /tmp/new_bundle_normalized.js
-        sed '/^[[:space:]]*$/d; s/[[:space:]]//g' shap/plots/resources/bundle.js | tr -d '\n' > /tmp/committed_bundle_normalized.js
-
-        if diff -q /tmp/new_bundle_normalized.js /tmp/committed_bundle_normalized.js > /dev/null; then
-          echo "✅ Bundle matches the committed version"
-        else
-          echo "❌ Built bundle differs from committed version"
-          echo "The bundle.js file needs to be updated."
-          echo "Run: cd javascript && npm run build && cp build/bundle.js ../shap/plots/resources/bundle.js"
-          exit 1
-        fi
+      - name: Start Energy Measurement
+        uses: green-coding-solutions/eco-ci-energy-estimation@862050e4f01f65b1436e5eca18ba4bd85562f0de
+        with:
+          json-output: true
+          task: start-measurement
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v3
+        with:
+          node-version: lts/Hydrogen
+      - run: npm ci
+        working-directory: ./javascript
+      - id: measurement-4
+        name: Record Measurement After Step
+        uses: green-coding-solutions/eco-ci-energy-estimation@862050e4f01f65b1436e5eca18ba4bd85562f0de
+        with:
+          json-output: true
+          label: Step
+          task: get-measurement
+      - run: npm run build
+        working-directory: ./javascript
+      - id: measurement-6
+        name: Record Measurement After Step
+        uses: green-coding-solutions/eco-ci-energy-estimation@862050e4f01f65b1436e5eca18ba4bd85562f0de
+        with:
+          json-output: true
+          label: Step
+          task: get-measurement
+      - run: npm run test
+        working-directory: ./javascript
+      - id: measurement-8
+        name: Record Measurement After Step
+        uses: green-coding-solutions/eco-ci-energy-estimation@862050e4f01f65b1436e5eca18ba4bd85562f0de
+        with:
+          json-output: true
+          label: Step
+          task: get-measurement
+      - name: Compare built bundle with committed bundle
+        run: "# Normalize whitespace in both files for comparison\n# Remove empty\
+          \ lines and all whitespace, then compare\nsed '/^[[:space:]]*$/d; s/[[:space:]]//g'\
+          \ javascript/build/bundle.js | tr -d '\\n' > /tmp/new_bundle_normalized.js\n\
+          sed '/^[[:space:]]*$/d; s/[[:space:]]//g' shap/plots/resources/bundle.js\
+          \ | tr -d '\\n' > /tmp/committed_bundle_normalized.js\n\nif diff -q /tmp/new_bundle_normalized.js\
+          \ /tmp/committed_bundle_normalized.js > /dev/null; then\n  echo \"\u2705\
+          \ Bundle matches the committed version\"\nelse\n  echo \"\u274C Built bundle\
+          \ differs from committed version\"\n  echo \"The bundle.js file needs to\
+          \ be updated.\"\n  echo \"Run: cd javascript && npm run build && cp build/bundle.js\
+          \ ../shap/plots/resources/bundle.js\"\n  exit 1\nfi\n"
+      - id: measurement-10
+        name: Record Measurement After Compare built bundle with committed bundle
+        uses: green-coding-solutions/eco-ci-energy-estimation@862050e4f01f65b1436e5eca18ba4bd85562f0de
+        with:
+          json-output: true
+          label: Compare built bundle with committed bundle
+          task: get-measurement
+      - id: display-measurement
+        name: Display Energy Results
+        uses: green-coding-solutions/eco-ci-energy-estimation@862050e4f01f65b1436e5eca18ba4bd85562f0de
+        with:
+          json-output: true
+          task: display-results
+      - name: Save Total Energy Consumption Data
+        run: echo '${{ steps.final-measurement.outputs.data-total-json }}' > total_energy_consumption.json
+      - name: Upload Energy Consumption Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: total-energy-consumption
+          path: total_energy_consumption.json
